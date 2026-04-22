@@ -1,0 +1,7 @@
+## Copy to `android/key.properties` (this file is gitignored).
+## Never commit or share `key.properties` or your keystore file.
+storeFile=app/clinicalcurator-upload.jks
+storePassword=REPLACE_ME
+keyAlias=clinicalcurator
+keyPassword=REPLACE_ME
+
