@@ -7,8 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/auth/auth_providers.dart';
+import '../../features/auth/password_rules.dart';
 import '../../features/session/session_controller.dart';
-import '../../features/settings/settings_controller.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/app_card.dart';
 
@@ -24,14 +24,21 @@ class ForgotPasswordScreen extends ConsumerStatefulWidget {
 class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
   final _emailCtrl = TextEditingController();
   final _otpCtrl = TextEditingController();
+  final _newPwCtrl = TextEditingController();
+  final _newPw2Ctrl = TextEditingController();
   int _step = 0;
   bool _loading = false;
   String? _error;
+  List<String> _pwHints = const [];
+  bool _obscure1 = true;
+  bool _obscure2 = true;
 
   @override
   void dispose() {
     _emailCtrl.dispose();
     _otpCtrl.dispose();
+    _newPwCtrl.dispose();
+    _newPw2Ctrl.dispose();
     super.dispose();
   }
 
@@ -77,7 +84,7 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
     setState(() => _step = 1);
   }
 
-  Future<void> _verifyAndLogin() async {
+  Future<void> _verifyCode() async {
     setState(() {
       _error = null;
       _loading = true;
@@ -93,29 +100,51 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
       setState(() => _error = res.error);
       return;
     }
-    final user = res.user!;
-    final role = user.appRole;
-    ref
-        .read(sessionControllerProvider.notifier)
-        .startSession(
-          email: user.email,
-          role: role,
-          loginHistory: user.loginHistory,
-        );
-    final settings = ref.read(settingsControllerProvider.notifier);
-    unawaited(settings.setProfileName(user.displayName));
-    unawaited(settings.setProfileEmail(user.email));
-    unawaited(
-      settings.setProfileRole(
-        role == AppRole.healthWorker ? 'HEALTH WORKER' : 'CLINICIAN',
-      ),
+    // Code is valid. Next: set a new password.
+    setState(() => _step = 2);
+  }
+
+  Future<void> _resetPassword() async {
+    setState(() {
+      _error = null;
+      _pwHints = passwordRuleFailures(_newPwCtrl.text);
+      _loading = true;
+    });
+
+    if (_pwHints.isNotEmpty) {
+      setState(() => _loading = false);
+      return;
+    }
+    if (_newPwCtrl.text != _newPw2Ctrl.text) {
+      setState(() {
+        _loading = false;
+        _error = 'Passwords do not match.';
+      });
+      return;
+    }
+
+    final repo = ref.read(localAuthRepositoryProvider);
+    final err = await repo.resetPasswordWithOtp(
+      email: _emailCtrl.text.trim(),
+      code: _otpCtrl.text.trim(),
+      newPassword: _newPwCtrl.text,
     );
     if (!mounted) return;
-    if (role == AppRole.healthWorker) {
-      context.go('/w/capture');
-    } else {
-      context.go('/c/dashboard');
+    setState(() => _loading = false);
+    if (err != null) {
+      setState(() => _error = err);
+      return;
     }
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Password updated. Please sign in.')),
+    );
+
+    // Clear any active session state just in case.
+    ref.read(sessionControllerProvider.notifier).endSession();
+    // Go back to login screen.
+    context.go('/auth');
   }
 
   @override
@@ -145,7 +174,9 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
                         Text(
                           _step == 0
                               ? 'Enter your account email. We will send a 6-digit code.'
-                              : 'Enter the 6-digit code (numeric keyboard).',
+                              : _step == 1
+                                  ? 'Enter the 6-digit code.'
+                                  : 'Set a new password for your account.',
                           style: Theme.of(context).textTheme.bodyMedium
                               ?.copyWith(
                                 color: Theme.of(
@@ -163,8 +194,64 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
                               prefixIcon: Icon(Icons.mail_outline),
                             ),
                           )
-                        else
+                        else if (_step == 1)
                           _OtpSixBoxes(controller: _otpCtrl),
+                        if (_step == 2) ...[
+                          TextField(
+                            controller: _newPwCtrl,
+                            obscureText: _obscure1,
+                            onChanged: (_) => setState(
+                              () => _pwHints =
+                                  passwordRuleFailures(_newPwCtrl.text),
+                            ),
+                            decoration: InputDecoration(
+                              labelText: 'New password',
+                              prefixIcon: const Icon(Icons.lock_outline),
+                              suffixIcon: IconButton(
+                                onPressed: () =>
+                                    setState(() => _obscure1 = !_obscure1),
+                                icon: Icon(
+                                  _obscure1
+                                      ? Icons.visibility_outlined
+                                      : Icons.visibility_off_outlined,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          TextField(
+                            controller: _newPw2Ctrl,
+                            obscureText: _obscure2,
+                            decoration: InputDecoration(
+                              labelText: 'Confirm new password',
+                              prefixIcon: const Icon(Icons.lock_outline),
+                              suffixIcon: IconButton(
+                                onPressed: () =>
+                                    setState(() => _obscure2 = !_obscure2),
+                                icon: Icon(
+                                  _obscure2
+                                      ? Icons.visibility_outlined
+                                      : Icons.visibility_off_outlined,
+                                ),
+                              ),
+                            ),
+                          ),
+                          if (_pwHints.isNotEmpty) ...[
+                            const SizedBox(height: 10),
+                            ..._pwHints.map(
+                              (h) => Padding(
+                                padding: const EdgeInsets.only(bottom: 2),
+                                child: Text(
+                                  '• Missing: $h',
+                                  style: const TextStyle(
+                                    color: AppColors.danger,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                         if (_error != null) ...[
                           const SizedBox(height: 12),
                           Text(
@@ -182,8 +269,10 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
                               : () {
                                   if (_step == 0) {
                                     unawaited(_requestOtp());
+                                  } else if (_step == 1) {
+                                    unawaited(_verifyCode());
                                   } else {
-                                    unawaited(_verifyAndLogin());
+                                    unawaited(_resetPassword());
                                   }
                                 },
                           child: _loading
@@ -198,7 +287,11 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
                                   ),
                                 )
                               : Text(
-                                  _step == 0 ? 'Send code' : 'Verify & sign in',
+                                  _step == 0
+                                      ? 'Send code'
+                                      : _step == 1
+                                          ? 'Verify code'
+                                          : 'Update password',
                                 ),
                         ),
                       ],

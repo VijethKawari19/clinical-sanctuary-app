@@ -223,4 +223,57 @@ class LocalAuthRepository {
     final updated = await _appendLoginHistory(u);
     return (user: updated, error: null);
   }
+
+  /// OTP-verified password reset.
+  ///
+  /// Returns error message or null on success.
+  Future<String?> resetPasswordWithOtp({
+    required String email,
+    required String code,
+    required String newPassword,
+  }) async {
+    final em = email.trim().toLowerCase();
+    if (!isValidEmail(em)) return 'Enter a valid email address.';
+    final fails = passwordRuleFailures(newPassword);
+    if (fails.isNotEmpty) {
+      return 'Password must include: ${fails.join(', ')}.';
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_otpKey);
+    if (raw == null) return 'No active reset code. Request a new one.';
+
+    Map<String, dynamic> m;
+    try {
+      m = jsonDecode(raw) as Map<String, dynamic>;
+    } catch (_) {
+      return 'Invalid reset state.';
+    }
+
+    if ((m['email'] as String?)?.toLowerCase() != em) {
+      return 'Code was requested for a different email.';
+    }
+
+    final exp = m['expires'] as int?;
+    if (exp != null && DateTime.now().millisecondsSinceEpoch > exp) {
+      await prefs.remove(_otpKey);
+      return 'Code expired. Request a new one.';
+    }
+
+    if ((m['code'] as String?) != code.trim()) {
+      return 'Incorrect code.';
+    }
+
+    final users = await _loadUsers();
+    final idx = users.indexWhere((u) => u.email.toLowerCase() == em);
+    if (idx < 0) {
+      await prefs.remove(_otpKey);
+      return 'Account no longer exists.';
+    }
+
+    users[idx] = users[idx].copyWith(passwordHash: _hash(newPassword));
+    await _saveUsers(users);
+    await prefs.remove(_otpKey);
+    return null;
+  }
 }

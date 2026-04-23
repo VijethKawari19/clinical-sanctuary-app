@@ -56,6 +56,8 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   Timer? _m83Watchdog;
   final List<Uint8List> _m83FrameRing = [];
   static const int _m83RingMax = 28;
+  bool _m83PreviewCheckInFlight = false;
+  Uint8List? _m83PreviewPending;
 
   late final FaceDetector _faceDetector = FaceDetector(
     options: FaceDetectorOptions(
@@ -298,11 +300,67 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
       setState(() {
         _m83LiveJpeg = null;
         _m83FrameRing.clear();
+        _m83PreviewCheckInFlight = false;
+        _m83PreviewPending = null;
         _m83Error = null;
         _m83Connecting = false;
         _m83LastFrameMs = 0;
       });
     }
+  }
+
+  bool get _isMobile =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS);
+
+  void _ingestM83PreviewFrame(Uint8List jpeg) {
+    if (!mounted || _inReview) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    _m83LastFrameMs = now;
+
+    // Mobile: cap preview FPS to keep decoder/UI stable.
+    final minDeltaMs = _isMobile ? 100 : 36; // ~10fps mobile, ~27fps desktop
+    if (now - _m83LastPreviewMs < minDeltaMs) return;
+    _m83LastPreviewMs = now;
+
+    // Keep a rolling buffer for capture selection.
+    _m83FrameRing.add(jpeg);
+    if (_m83FrameRing.length > _m83RingMax) {
+      _m83FrameRing.removeRange(0, _m83FrameRing.length - _m83RingMax);
+    }
+
+    if (!_isMobile) {
+      setState(() {
+        _m83LiveJpeg = jpeg;
+        _m83Connecting = false;
+      });
+      return;
+    }
+
+    // Mobile: never display suspicious frames; validate asynchronously.
+    if (_m83PreviewCheckInFlight) {
+      _m83PreviewPending = jpeg;
+      return;
+    }
+
+    _m83PreviewCheckInFlight = true;
+    unawaited(() async {
+      final isBad = await _hasBottomBandCorruption(jpeg);
+      if (!mounted) return;
+      if (!isBad) {
+        setState(() {
+          _m83LiveJpeg = jpeg;
+          _m83Connecting = false;
+        });
+      }
+      _m83PreviewCheckInFlight = false;
+      final pending = _m83PreviewPending;
+      _m83PreviewPending = null;
+      if (pending != null) {
+        _ingestM83PreviewFrame(pending);
+      }
+    }());
   }
 
   void _startM83Watchdog() {
@@ -345,22 +403,8 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
       host: host,
       port: port,
       onJpegFrame: (jpeg) {
-        if (!mounted || _inReview) return;
-        final now = DateTime.now().millisecondsSinceEpoch;
-        _m83LastFrameMs = now;
-        if (now - _m83LastPreviewMs < 36) return;
-        _m83LastPreviewMs = now;
-        // Keep a small rolling buffer so "Capture" can pick the best frame
-        // (avoids freezing a single corrupted-but-decodable frame).
         final copy = Uint8List.fromList(jpeg);
-        _m83FrameRing.add(copy);
-        if (_m83FrameRing.length > _m83RingMax) {
-          _m83FrameRing.removeRange(0, _m83FrameRing.length - _m83RingMax);
-        }
-        setState(() {
-          _m83LiveJpeg = copy;
-          _m83Connecting = false;
-        });
+        _ingestM83PreviewFrame(copy);
       },
       onHardwareShutter: _onM83HardwareShutter,
       onHardwareBack: _onM83HardwareBack,
