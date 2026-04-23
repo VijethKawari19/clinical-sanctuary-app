@@ -15,7 +15,9 @@ import 'package:go_router/go_router.dart';
 
 import '../../features/m83/m83_wireless_client.dart';
 import '../../features/session/session_controller.dart';
+import '../../features/clinic/clinic_models.dart';
 import '../../theme/app_theme.dart';
+import '../../features/clinic/clinic_controller.dart';
 import 'widgets/m83_wifi_guide_dialog.dart';
 
 enum CaptureSource { system, wireless, gallery }
@@ -74,6 +76,8 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         ext == 'heif' ||
         ext == 'heic';
   }
+
+  bool _leavingScreen = false;
 
   @override
   void initState() {
@@ -543,15 +547,53 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     final bytes = _reviewBytes;
     final mode = _reviewMode;
     if (bytes == null || mode == null) return;
+
+    final draft = ref.read(sessionControllerProvider).patientDraft;
+    if (draft == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Enter patient details first.')),
+        );
+        context.go('/w/patient-info');
+      }
+      return;
+    }
+
     final b64 = base64Encode(bytes);
-    ref
-        .read(sessionControllerProvider.notifier)
-        .setTempCapture(TempCaptureBuffer(imageBase64: b64, mode: mode));
+    final ctrl = ref.read(clinicControllerProvider.notifier);
+    ctrl.createPendingCase(
+      patientName: draft.patientName,
+      patientAge: draft.patientAge,
+      patientGender: switch (draft.patientGender) {
+        'male' => PatientGender.male,
+        'female' => PatientGender.female,
+        _ => PatientGender.other,
+      },
+      bloodGroup: draft.bloodGroup,
+      heightCm: draft.heightCm,
+      weightKg: draft.weightKg,
+      aadhaarNumber: draft.aadhaarNumber,
+      tobaccoUse: draft.tobaccoUse,
+      alcoholUse: draft.alcoholUse,
+      contactPhone: draft.contactPhone,
+      contactEmail: draft.contactEmail,
+      imageBase64: b64,
+      notes: draft.notes,
+    );
+    final createdId = ref.read(clinicControllerProvider).cases.first.id;
+
+    _leavingScreen = true;
     setState(() {
       _reviewBytes = null;
       _reviewMode = null;
     });
-    context.go('/w/patient-info');
+    // Navigate first; clear draft after we leave this screen to avoid
+    // the "details required" redirect firing during navigation.
+    context.push('/w/processing/$createdId');
+    Future<void>.microtask(() {
+      if (!mounted) return;
+      ref.read(sessionControllerProvider.notifier).clearPatientDraft();
+    });
   }
 
   Future<void> _capture() async {
@@ -604,6 +646,13 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Enforce flow: details first, then capture.
+    final draft = ref.watch(sessionControllerProvider).patientDraft;
+    if (draft == null && !_leavingScreen) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (context.mounted) context.go('/w/patient-info');
+      });
+    }
     return Scaffold(
       backgroundColor: const Color(0xFF0B0F17),
       body: SafeArea(
@@ -618,12 +667,8 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
                   unawaited(_retakeReview());
                   return;
                 }
-                if (context.canPop()) {
-                  context.pop();
-                } else {
-                  ref.read(sessionControllerProvider.notifier).endSession();
-                  context.go('/auth');
-                }
+                // Always allow user to go back to edit patient details.
+                context.go('/w/patient-info');
               },
             ),
             Expanded(

@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../features/clinic/clinic_controller.dart';
 import '../../features/clinic/clinic_models.dart';
 import '../../features/session/session_controller.dart';
 import '../../theme/app_theme.dart';
@@ -22,14 +21,15 @@ class _PatientInfoScreenState extends ConsumerState<PatientInfoScreen> {
   final _ageCtrl = TextEditingController();
   final _heightCtrl = TextEditingController();
   final _weightCtrl = TextEditingController();
+  final _bloodOtherCtrl = TextEditingController();
   final _aadhaarCtrl = TextEditingController();
+  final _tobaccoCtrl = TextEditingController();
+  final _alcoholCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   final _notesCtrl = TextEditingController();
   PatientGender _gender = PatientGender.male;
   String? _bloodGroupPick;
-  String? _tobaccoUse;
-  String? _alcoholUse;
 
   static const _bloodGroups = <String>[
     'A+',
@@ -40,9 +40,9 @@ class _PatientInfoScreenState extends ConsumerState<PatientInfoScreen> {
     'AB-',
     'O+',
     'O-',
+    'Other',
   ];
 
-  static const _yesNoFormer = <String>['No', 'Yes', 'Former'];
   static const double _maxHeightCm = 271;
   static const double _maxWeightKg = 300;
 
@@ -99,7 +99,10 @@ class _PatientInfoScreenState extends ConsumerState<PatientInfoScreen> {
     _ageCtrl.dispose();
     _heightCtrl.dispose();
     _weightCtrl.dispose();
+    _bloodOtherCtrl.dispose();
     _aadhaarCtrl.dispose();
+    _tobaccoCtrl.dispose();
+    _alcoholCtrl.dispose();
     _phoneCtrl.dispose();
     _emailCtrl.dispose();
     _notesCtrl.dispose();
@@ -113,11 +116,12 @@ class _PatientInfoScreenState extends ConsumerState<PatientInfoScreen> {
     final age = int.tryParse(_ageCtrl.text.trim());
     final ageOk = age != null && age >= 1 && age <= 120;
 
-    final bloodOk = _bloodGroupPick != null;
+    final bloodOtherOk =
+        _bloodGroupPick != 'Other' || _bloodOtherCtrl.text.trim().isNotEmpty;
 
-    final heightOk = _heightError == null && _heightCtrl.text.trim().isNotEmpty;
+    final heightOk = _heightError == null;
 
-    final weightOk = _weightError == null && _weightCtrl.text.trim().isNotEmpty;
+    final weightOk = _weightError == null;
 
     final aadhaar = _aadhaarCtrl.text.trim();
     final aadhaarOk = RegExp(r'^\d{12}$').hasMatch(aadhaar);
@@ -128,12 +132,12 @@ class _PatientInfoScreenState extends ConsumerState<PatientInfoScreen> {
     final emailOk =
         email.isEmpty || RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email);
 
-    final tobaccoOk = _tobaccoUse != null;
-    final alcoholOk = _alcoholUse != null;
+    final tobaccoOk = _tobaccoCtrl.text.trim().isNotEmpty;
+    final alcoholOk = _alcoholCtrl.text.trim().isNotEmpty;
 
     return nameOk &&
         ageOk &&
-        bloodOk &&
+        bloodOtherOk &&
         heightOk &&
         weightOk &&
         aadhaarOk &&
@@ -141,6 +145,43 @@ class _PatientInfoScreenState extends ConsumerState<PatientInfoScreen> {
         alcoholOk &&
         phoneOk &&
         emailOk;
+  }
+
+  String _firstValidationMessage() {
+    final name = _nameCtrl.text.trim();
+    if (name.isEmpty) return 'Enter full name.';
+    if (!RegExp(r'^[A-Za-z ]+$').hasMatch(name)) {
+      return 'Name should contain letters only.';
+    }
+
+    final age = int.tryParse(_ageCtrl.text.trim());
+    if (age == null) return 'Enter age (numbers only).';
+    if (age < 1 || age > 120) return 'Age must be between 1 and 120.';
+
+    if (_bloodGroupPick == 'Other' && _bloodOtherCtrl.text.trim().isEmpty) {
+      return 'Enter blood group (Other).';
+    }
+    if (_heightError != null) return _heightError!;
+    if (_weightError != null) return _weightError!;
+
+    final aadhaar = _aadhaarCtrl.text.trim();
+    if (!RegExp(r'^\d{12}$').hasMatch(aadhaar)) {
+      return 'Enter Aadhaar number (12 digits).';
+    }
+
+    if (_tobaccoCtrl.text.trim().isEmpty) return 'Enter tobacco use.';
+    if (_alcoholCtrl.text.trim().isEmpty) return 'Enter alcohol use.';
+
+    final phone = _phoneCtrl.text.trim();
+    if (phone.length != 10) return 'Enter phone number (10 digits).';
+
+    final email = _emailCtrl.text.trim();
+    if (email.isNotEmpty &&
+        !RegExp(r'^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$').hasMatch(email)) {
+      return 'Enter a valid email or leave it blank.';
+    }
+
+    return 'Please check the form fields.';
   }
 
   /// [context.go] to this screen leaves no stack entry, so [pop] does nothing.
@@ -155,12 +196,35 @@ class _PatientInfoScreenState extends ConsumerState<PatientInfoScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final buf = ref.watch(sessionControllerProvider).tempCaptureBuffer;
-    if (buf == null) {
-      // Entered without a capture buffer (e.g., deep link). Send back to capture.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (context.mounted) context.go('/w/capture');
-      });
+    final session = ref.watch(sessionControllerProvider);
+    final draft = session.patientDraft;
+    if (draft != null) {
+      // Restore previously entered details (user came back to edit).
+      // Only fill when controllers are empty to avoid clobbering edits mid-typing.
+      if (_nameCtrl.text.isEmpty) _nameCtrl.text = draft.patientName;
+      if (_ageCtrl.text.isEmpty) _ageCtrl.text = draft.patientAge;
+      if (_heightCtrl.text.isEmpty) _heightCtrl.text = draft.heightCm;
+      if (_weightCtrl.text.isEmpty) _weightCtrl.text = draft.weightKg;
+      if (_aadhaarCtrl.text.isEmpty) _aadhaarCtrl.text = draft.aadhaarNumber;
+      if (_phoneCtrl.text.isEmpty) _phoneCtrl.text = draft.contactPhone;
+      if (_emailCtrl.text.isEmpty) _emailCtrl.text = draft.contactEmail;
+      if (_notesCtrl.text.isEmpty) _notesCtrl.text = draft.notes;
+      if (_tobaccoCtrl.text.isEmpty) _tobaccoCtrl.text = draft.tobaccoUse;
+      if (_alcoholCtrl.text.isEmpty) _alcoholCtrl.text = draft.alcoholUse;
+      if (_bloodGroupPick == null) {
+        final bg = draft.bloodGroup.trim();
+        if (bg.isNotEmpty && _bloodGroups.contains(bg)) {
+          _bloodGroupPick = bg;
+        } else if (bg.isNotEmpty) {
+          _bloodGroupPick = 'Other';
+          if (_bloodOtherCtrl.text.isEmpty) _bloodOtherCtrl.text = bg;
+        }
+      }
+      _gender = switch (draft.patientGender) {
+        'male' => PatientGender.male,
+        'female' => PatientGender.female,
+        _ => PatientGender.other,
+      };
     }
 
     final scheme = Theme.of(context).colorScheme;
@@ -199,101 +263,102 @@ class _PatientInfoScreenState extends ConsumerState<PatientInfoScreen> {
           ),
           Expanded(
             child: Scrollbar(
-                    controller: _scrollCtrl,
-                    thumbVisibility: false,
-                    child: SingleChildScrollView(
-                      controller: _scrollCtrl,
-                      padding: const EdgeInsets.all(18),
-                      child: LayoutBuilder(
-                        builder: (context, constraints) {
-                          final wide = constraints.maxWidth >= 980;
-                          return Wrap(
-                            spacing: 18,
-                            runSpacing: 18,
-                            children: [
-                            SizedBox(
-                              width: wide ? (constraints.maxWidth - 18) * 0.65 : null,
-                              child: AppCard(
-                                child: Padding(
-                                  padding: const EdgeInsets.all(18),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        'Enter basic details to complete the screening submission.',
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodyMedium
-                                            ?.copyWith(
-                                                color: scheme.onSurfaceVariant),
+              thumbVisibility: false,
+              child: SingleChildScrollView(
+                controller: _scrollCtrl,
+                padding: const EdgeInsets.all(18),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final wide = constraints.maxWidth >= 980;
+                    return Wrap(
+                      spacing: 18,
+                      runSpacing: 18,
+                      children: [
+                        SizedBox(
+                          width: wide ? (constraints.maxWidth - 18) * 0.65 : null,
+                          child: AppCard(
+                            child: Padding(
+                              padding: const EdgeInsets.all(18),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Enter basic details to complete the screening submission.',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodyMedium
+                                        ?.copyWith(
+                                          color: scheme.onSurfaceVariant,
+                                        ),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  _Field(
+                                    label: 'Full Name',
+                                    icon: Icons.person_outline_rounded,
+                                    child: TextField(
+                                      controller: _nameCtrl,
+                                      onChanged: (_) => setState(() {}),
+                                      inputFormatters: [
+                                        FilteringTextInputFormatter.allow(
+                                          RegExp(r'[A-Za-z ]'),
+                                        ),
+                                      ],
+                                      textCapitalization:
+                                          TextCapitalization.words,
+                                      decoration: const InputDecoration(
+                                        hintText: 'e.g. John Doe',
                                       ),
-                                      const SizedBox(height: 16),
-                                      _Field(
-                                        label: 'Full Name',
-                                        icon: Icons.person_outline_rounded,
-                                        child: TextField(
-                                          controller: _nameCtrl,
-                                          onChanged: (_) => setState(() {}),
-                                          inputFormatters: [
-                                            FilteringTextInputFormatter.allow(
-                                              RegExp(r'[A-Za-z ]'),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: _Field(
+                                          label: 'Age',
+                                          icon: Icons.calendar_month_outlined,
+                                          child: TextField(
+                                            controller: _ageCtrl,
+                                            onChanged: (_) => setState(() {}),
+                                            keyboardType: TextInputType.number,
+                                            inputFormatters: [
+                                              FilteringTextInputFormatter
+                                                  .digitsOnly,
+                                              LengthLimitingTextInputFormatter(
+                                                3,
+                                              ),
+                                            ],
+                                            decoration: const InputDecoration(
+                                              hintText: 'Years',
                                             ),
-                                          ],
-                                          textCapitalization:
-                                              TextCapitalization.words,
-                                          decoration: const InputDecoration(
-                                            hintText: 'e.g. John Doe',
                                           ),
                                         ),
                                       ),
-                                      const SizedBox(height: 12),
-                                      Row(
-                                        children: [
-                                          Expanded(
-                                            child: _Field(
-                                              label: 'Age',
-                                              icon: Icons.calendar_month_outlined,
-                                              child: TextField(
-                                                controller: _ageCtrl,
-                                                onChanged: (_) => setState(() {}),
-                                                keyboardType: TextInputType.number,
-                                                inputFormatters: [
-                                                  FilteringTextInputFormatter
-                                                      .digitsOnly,
-                                                  LengthLimitingTextInputFormatter(
-                                                    3,
-                                                  ),
-                                                ],
-                                                decoration: const InputDecoration(
-                                                  hintText: 'Years',
-                                                ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: _Field(
+                                          label: 'Gender',
+                                          icon: Icons.group_outlined,
+                                          child: DropdownButtonFormField<
+                                              PatientGender>(
+                                            initialValue: _gender,
+                                            items: const [
+                                              DropdownMenuItem(
+                                                value: PatientGender.male,
+                                                child: Text('Male'),
                                               ),
-                                            ),
-                                          ),
-                                          const SizedBox(width: 12),
-                                          Expanded(
-                                            child: _Field(
-                                              label: 'Gender',
-                                              icon: Icons.group_outlined,
-                                              child: DropdownButtonFormField<PatientGender>(
-                                                initialValue: _gender,
-                                                items: const [
-                                                  DropdownMenuItem(
-                                                    value: PatientGender.male,
-                                                    child: Text('Male'),
-                                                  ),
-                                                  DropdownMenuItem(
-                                                    value: PatientGender.female,
-                                                    child: Text('Female'),
-                                                  ),
-                                                  DropdownMenuItem(
-                                                    value: PatientGender.other,
-                                                    child: Text('Other'),
-                                                  ),
-                                                ],
-                                                onChanged: (v) =>
-                                                    setState(() => _gender = v!),
-                                                decoration:
+                                              DropdownMenuItem(
+                                                value: PatientGender.female,
+                                                child: Text('Female'),
+                                              ),
+                                              DropdownMenuItem(
+                                                value: PatientGender.other,
+                                                child: Text('Other'),
+                                              ),
+                                            ],
+                                            onChanged: (v) =>
+                                                setState(() => _gender = v!),
+                                            decoration:
                                                     const InputDecoration(),
                                               ),
                                             ),
@@ -304,22 +369,45 @@ class _PatientInfoScreenState extends ConsumerState<PatientInfoScreen> {
                                       _Field(
                                         label: 'Blood Group',
                                         icon: Icons.bloodtype_outlined,
-                                        child: DropdownButtonFormField<String>(
-                                          key: ValueKey(_bloodGroupPick),
-                                          initialValue: _bloodGroupPick,
-                                          decoration: const InputDecoration(
-                                            hintText: 'Select blood group',
-                                          ),
-                                          items: _bloodGroups
-                                              .map(
-                                                (bg) => DropdownMenuItem(
-                                                  value: bg,
-                                                  child: Text(bg),
+                                        child: Column(
+                                          children: [
+                                            DropdownButtonFormField<String>(
+                                              key: ValueKey(_bloodGroupPick),
+                                              initialValue: _bloodGroupPick,
+                                              decoration: const InputDecoration(
+                                                hintText:
+                                                    'Select blood group (optional)',
+                                              ),
+                                              items: _bloodGroups
+                                                  .map(
+                                                    (bg) => DropdownMenuItem(
+                                                      value: bg,
+                                                      child: Text(bg),
+                                                    ),
+                                                  )
+                                                  .toList(growable: false),
+                                              onChanged: (v) {
+                                                setState(() {
+                                                  _bloodGroupPick = v;
+                                                  if (v != 'Other') {
+                                                    _bloodOtherCtrl.clear();
+                                                  }
+                                                });
+                                              },
+                                            ),
+                                            if (_bloodGroupPick == 'Other') ...[
+                                              const SizedBox(height: 10),
+                                              TextField(
+                                                controller: _bloodOtherCtrl,
+                                                onChanged: (_) =>
+                                                    setState(() {}),
+                                                decoration: const InputDecoration(
+                                                  hintText:
+                                                      'Enter blood group',
                                                 ),
-                                              )
-                                              .toList(growable: false),
-                                          onChanged: (v) =>
-                                              setState(() => _bloodGroupPick = v),
+                                              ),
+                                            ],
+                                          ],
                                         ),
                                       ),
                                       const SizedBox(height: 12),
@@ -435,20 +523,13 @@ class _PatientInfoScreenState extends ConsumerState<PatientInfoScreen> {
                                             child: _Field(
                                               label: 'Tobacco Use',
                                               icon: Icons.smoking_rooms_outlined,
-                                              child: DropdownButtonFormField<String>(
-                                                key: ValueKey(_tobaccoUse),
-                                                initialValue: _tobaccoUse,
-                                                items: _yesNoFormer
-                                                    .map(
-                                                      (v) => DropdownMenuItem(
-                                                        value: v,
-                                                        child: Text(v),
-                                                      ),
-                                                    )
-                                                    .toList(growable: false),
-                                                onChanged: (v) =>
-                                                    setState(() => _tobaccoUse = v),
-                                                decoration: const InputDecoration(),
+                                              child: TextField(
+                                                controller: _tobaccoCtrl,
+                                                onChanged: (_) => setState(() {}),
+                                                decoration: const InputDecoration(
+                                                  hintText:
+                                                      'e.g. No / Yes / Former / occasional',
+                                                ),
                                               ),
                                             ),
                                           ),
@@ -457,20 +538,13 @@ class _PatientInfoScreenState extends ConsumerState<PatientInfoScreen> {
                                             child: _Field(
                                               label: 'Alcohol',
                                               icon: Icons.local_bar_outlined,
-                                              child: DropdownButtonFormField<String>(
-                                                key: ValueKey(_alcoholUse),
-                                                initialValue: _alcoholUse,
-                                                items: _yesNoFormer
-                                                    .map(
-                                                      (v) => DropdownMenuItem(
-                                                        value: v,
-                                                        child: Text(v),
-                                                      ),
-                                                    )
-                                                    .toList(growable: false),
-                                                onChanged: (v) =>
-                                                    setState(() => _alcoholUse = v),
-                                                decoration: const InputDecoration(),
+                                              child: TextField(
+                                                controller: _alcoholCtrl,
+                                                onChanged: (_) => setState(() {}),
+                                                decoration: const InputDecoration(
+                                                  hintText:
+                                                      'e.g. No / Yes / Former / occasional',
+                                                ),
                                               ),
                                             ),
                                           ),
@@ -550,58 +624,73 @@ class _PatientInfoScreenState extends ConsumerState<PatientInfoScreen> {
                                           const SizedBox(width: 12),
                                           Expanded(
                                             child: ElevatedButton.icon(
-                                              onPressed: !_valid
-                                                  ? null
-                                                  : () {
-                                                      final img = buf?.imageBase64;
-                                                      if (img == null) {
-                                                        context.go('/w/capture');
-                                                        return;
-                                                      }
-                                                      final ctrl = ref.read(
-                                                          clinicControllerProvider
-                                                              .notifier);
-                                                      ctrl.createPendingCase(
-                                                        patientName:
-                                                            _nameCtrl.text.trim(),
-                                                        patientAge:
-                                                            _ageCtrl.text.trim(),
-                                                        patientGender: _gender,
-                                                        bloodGroup:
-                                                            _bloodGroupPick!,
-                                                        heightCm:
-                                                            _heightCtrl.text.trim(),
-                                                        weightKg:
-                                                            _weightCtrl.text.trim(),
-                                                        aadhaarNumber:
-                                                            _aadhaarCtrl.text.trim(),
-                                                        tobaccoUse:
-                                                            _tobaccoUse!.toLowerCase(),
-                                                        alcoholUse:
-                                                            _alcoholUse!.toLowerCase(),
-                                                        contactPhone:
-                                                            _phoneCtrl.text.trim(),
-                                                        contactEmail:
-                                                            _emailCtrl.text.trim(),
-                                                        imageBase64:
-                                                            img,
-                                                        notes:
-                                                            _notesCtrl.text.trim(),
-                                                      );
-                                                      final createdId = ref
+                                              onPressed: () {
+                                                if (!_valid) {
+                                                  ScaffoldMessenger.of(context)
+                                                      .showSnackBar(
+                                                    SnackBar(
+                                                      content: Text(
+                                                        _firstValidationMessage(),
+                                                      ),
+                                                    ),
+                                                  );
+                                                  return;
+                                                }
+                                                      ref
                                                           .read(
-                                                              clinicControllerProvider)
-                                                          .cases
-                                                          .first
-                                                          .id;
-                                                      context.push(
-                                                        '/w/processing/$createdId',
-                                                      );
-                                                    },
+                                                            sessionControllerProvider
+                                                                .notifier,
+                                                          )
+                                                          .setPatientDraft(
+                                                            PatientDraft(
+                                                              patientName:
+                                                                  _nameCtrl.text
+                                                                      .trim(),
+                                                              patientAge:
+                                                                  _ageCtrl.text
+                                                                      .trim(),
+                                                              patientGender:
+                                                                  _gender.name,
+                                                              bloodGroup:
+                                                                  _bloodGroupPick ==
+                                                                          'Other'
+                                                                      ? _bloodOtherCtrl
+                                                                          .text
+                                                                          .trim()
+                                                                      : (_bloodGroupPick ??
+                                                                          ''),
+                                                              heightCm:
+                                                                  _heightCtrl.text
+                                                                      .trim(),
+                                                              weightKg:
+                                                                  _weightCtrl.text
+                                                                      .trim(),
+                                                              aadhaarNumber:
+                                                                  _aadhaarCtrl.text
+                                                                      .trim(),
+                                                              tobaccoUse:
+                                                                  _tobaccoCtrl.text
+                                                                      .trim(),
+                                                              alcoholUse:
+                                                                  _alcoholCtrl.text
+                                                                      .trim(),
+                                                              contactPhone:
+                                                                  _phoneCtrl.text
+                                                                      .trim(),
+                                                              contactEmail:
+                                                                  _emailCtrl.text
+                                                                      .trim(),
+                                                              notes: _notesCtrl
+                                                                  .text
+                                                                  .trim(),
+                                                            ),
+                                                          );
+                                                      context.go('/w/capture');
+                                              },
                                               icon: const Icon(
                                                   Icons.send_rounded, size: 18),
                                               label: const Text(
-                                                'Save & Submit Case',
+                                                'Continue to Capture',
                                                 maxLines: 1,
                                                 overflow: TextOverflow.ellipsis,
                                                 softWrap: false,
@@ -622,50 +711,52 @@ class _PatientInfoScreenState extends ConsumerState<PatientInfoScreen> {
                                 ),
                               ),
                             ),
-                            SizedBox(
-                              width: wide ? (constraints.maxWidth - 18) * 0.35 : null,
-                              child: AppCard(
-                                child: Padding(
-                                  padding: const EdgeInsets.all(18),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                        SizedBox(
+                          width: wide ? (constraints.maxWidth - 18) * 0.35 : null,
+                          child: AppCard(
+                            child: Padding(
+                              padding: const EdgeInsets.all(18),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
                                     children: [
-                                      Row(
-                                        children: [
-                                          const Icon(Icons.info_outline_rounded,
-                                              color: AppColors.primary),
-                                          const SizedBox(width: 10),
-                                          Text(
-                                            'What happens next?',
-                                            style: Theme.of(context)
-                                                .textTheme
-                                                .titleSmall
-                                                ?.copyWith(fontWeight: FontWeight.w900),
-                                          ),
-                                        ],
+                                      const Icon(
+                                        Icons.info_outline_rounded,
+                                        color: AppColors.primary,
                                       ),
-                                      const SizedBox(height: 10),
+                                      const SizedBox(width: 10),
                                       Text(
-                                        'The captured image and patient data will be securely uploaded for clinician review.\n\nYou will be redirected back to the screening start page.',
-                                        style: TextStyle(
-                                          color: scheme.onSurfaceVariant,
-                                          height: 1.4,
-                                        ),
+                                        'What happens next?',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .titleSmall
+                                            ?.copyWith(fontWeight: FontWeight.w900),
                                       ),
                                     ],
                                   ),
-                                ),
+                                  const SizedBox(height: 10),
+                                  Text(
+                                    'The captured image and patient data will be securely uploaded for clinician review.\n\nYou will be redirected back to the screening start page.',
+                                    style: TextStyle(
+                                      color: scheme.onSurfaceVariant,
+                                      height: 1.4,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                            ],
-                          );
-                        },
-                      ),
-                    ),
-                  ),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
                 ),
-              ],
+              ),
             ),
+          ),
+        ],
+      ),
     );
   }
 }

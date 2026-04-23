@@ -135,6 +135,7 @@ class SubmissionSuccessScreen extends ConsumerWidget {
                                             sessionControllerProvider.notifier,
                                           )
                                           .clearTempCapture();
+                                      // Start next capture without re-prompting details.
                                       context.go('/w/capture');
                                     },
                                     child: const Text(

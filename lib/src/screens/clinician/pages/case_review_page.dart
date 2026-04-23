@@ -1,12 +1,13 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 
 import '../../../features/clinic/clinic_controller.dart';
 import '../../../features/clinic/clinic_models.dart';
@@ -270,23 +271,28 @@ class _CaseReviewPageState extends ConsumerState<CaseReviewPage> {
                       final bytes = type == _ReportType.short
                           ? await _buildPdfShort(caseRec, imageBytes)
                           : await _buildPdf(caseRec, imageBytes);
-                      final loc = await getSaveLocation(
-                        suggestedName: type == _ReportType.short
-                            ? 'Case-${caseRec.id}-short.pdf'
-                            : 'Case-${caseRec.id}-detailed.pdf',
-                      );
+                      final fileName = type == _ReportType.short
+                          ? 'Case-${caseRec.id}-short.pdf'
+                          : 'Case-${caseRec.id}-detailed.pdf';
+
+                      // Mobile: share/save via platform share sheet (works on Android/iOS).
+                      if (!kIsWeb &&
+                          (defaultTargetPlatform == TargetPlatform.android ||
+                              defaultTargetPlatform == TargetPlatform.iOS)) {
+                        await Printing.sharePdf(bytes: bytes, filename: fileName);
+                        return;
+                      }
+
+                      // Desktop: use file picker save location.
+                      final loc = await getSaveLocation(suggestedName: fileName);
                       if (loc == null) return;
                       await XFile.fromData(
                         bytes,
                         mimeType: 'application/pdf',
-                        name: type == _ReportType.short
-                            ? 'Case-${caseRec.id}-short.pdf'
-                            : 'Case-${caseRec.id}-detailed.pdf',
+                        name: fileName,
                       ).saveTo(loc.path);
                       if (!mounted) return;
-                      messenger.showSnackBar(
-                        SnackBar(content: Text('Saved: ${loc.path}')),
-                      );
+                      messenger.showSnackBar(SnackBar(content: Text('Saved: ${loc.path}')));
                     },
               icon: const Icon(Icons.download_outlined),
               label: Text(isNarrow ? 'Export' : 'Export Report'),

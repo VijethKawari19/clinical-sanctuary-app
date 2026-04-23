@@ -124,99 +124,116 @@ class _PatientQueuePageState extends ConsumerState<PatientQueuePage> {
               ?.copyWith(color: scheme.onSurfaceVariant),
         ),
         const SizedBox(height: 16),
-        Row(
-          children: [
-            Expanded(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 640),
-                child: TextField(
-                  controller: _searchCtrl,
-                  onChanged: (_) => setState(() {}),
-                  style: TextStyle(color: scheme.onSurface),
-                  decoration: InputDecoration(
-                    hintText: _searchMode == _SearchMode.idOnly
-                        ? 'Search by patient ID...'
-                        : 'Search by Patient Name or ID...',
-                    hintStyle:
-                        TextStyle(color: scheme.onSurfaceVariant),
-                    prefixIcon: Icon(Icons.search_rounded,
-                        color: scheme.onSurfaceVariant),
-                    suffixIcon: _searchCtrl.text.isNotEmpty
-                        ? IconButton(
-                            tooltip: 'Clear',
-                            onPressed: _clearSearch,
-                            icon: Icon(Icons.close_rounded,
-                                color: scheme.onSurfaceVariant),
-                          )
-                        : null,
-                    filled: true,
-                    fillColor: scheme.surfaceContainerHighest,
+        // One search bar (inside the page), full-width for mobile.
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 640),
+          child: TextField(
+            controller: _searchCtrl,
+            onChanged: (_) => setState(() {}),
+            style: TextStyle(color: scheme.onSurface),
+            decoration: InputDecoration(
+              hintText: _searchMode == _SearchMode.idOnly
+                  ? 'Search by patient ID...'
+                  : 'Search patient...',
+              hintStyle: TextStyle(color: scheme.onSurfaceVariant),
+              prefixIcon:
+                  Icon(Icons.search_rounded, color: scheme.onSurfaceVariant),
+              suffixIcon: _searchCtrl.text.isNotEmpty
+                  ? IconButton(
+                      tooltip: 'Clear',
+                      onPressed: _clearSearch,
+                      icon: Icon(Icons.close_rounded,
+                          color: scheme.onSurfaceVariant),
+                    )
+                  : null,
+              filled: true,
+              fillColor: scheme.surfaceContainerHighest,
+              isDense: true,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide:
+                    BorderSide(color: scheme.outline.withValues(alpha: 0.65)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide:
+                    BorderSide(color: scheme.outline.withValues(alpha: 0.65)),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          height: 44,
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _Pill(
+                  icon: Icons.badge_outlined,
+                  label: 'ID',
+                  selected: _searchMode == _SearchMode.idOnly,
+                  onTap: () => setState(() {
+                    _searchMode = _searchMode == _SearchMode.idOnly
+                        ? _SearchMode.both
+                        : _SearchMode.idOnly;
+                  }),
+                ),
+                const SizedBox(width: 10),
+                _Pill(
+                  icon: Icons.task_alt_rounded,
+                  label: switch (_statusFilter) {
+                    _StatusFilter.all => 'Status',
+                    _StatusFilter.reviewed => 'Reviewed',
+                    _StatusFilter.pending => 'Pending',
+                  },
+                  selected: _statusFilter != _StatusFilter.all,
+                  onTap: () async {
+                    final picked = await _pickStatus(context, _statusFilter);
+                    if (!mounted) return;
+                    if (picked == null) return;
+                    setState(() => _statusFilter = picked);
+                  },
+                ),
+                const SizedBox(width: 10),
+                _Pill(
+                  icon: Icons.warning_amber_rounded,
+                  label: switch (_riskPick) {
+                    _RiskPick.low => 'Low',
+                    _RiskPick.moderate => 'Medium',
+                    _RiskPick.high => 'High',
+                    _RiskPick.all => 'Risk',
+                  },
+                  selected: _riskPick != _RiskPick.all,
+                  onTap: () async {
+                    final picked = await _pickRisk(context, _riskPick);
+                    if (!mounted) return;
+                    if (picked == null) return;
+                    setState(() => _riskPick = picked);
+                  },
+                ),
+                const SizedBox(width: 10),
+                IconButton(
+                  onPressed: _riskPick != _RiskPick.all
+                      ? null
+                      : () => setState(() {
+                            _riskSort = _riskSort == _RiskSort.highToLow
+                                ? _RiskSort.lowToHigh
+                                : _RiskSort.highToLow;
+                          }),
+                  icon: const Icon(Icons.swap_vert_rounded),
+                  style: IconButton.styleFrom(
+                    backgroundColor: scheme.surfaceContainerHighest,
+                    foregroundColor: scheme.onSurface,
+                    side: BorderSide(
+                        color: scheme.outline.withValues(alpha: 0.65)),
                   ),
                 ),
-              ),
+              ],
             ),
-            const SizedBox(width: 12),
-            _Pill(
-              icon: Icons.badge_outlined,
-              label: 'ID',
-              selected: _searchMode == _SearchMode.idOnly,
-              onTap: () => setState(() {
-                _searchMode = _searchMode == _SearchMode.idOnly
-                    ? _SearchMode.both
-                    : _SearchMode.idOnly;
-              }),
-            ),
-            const SizedBox(width: 10),
-            _Pill(
-              icon: Icons.task_alt_rounded,
-              label: switch (_statusFilter) {
-                _StatusFilter.all => 'Status',
-                _StatusFilter.reviewed => 'Reviewed',
-                _StatusFilter.pending => 'Pending',
-              },
-              selected: _statusFilter != _StatusFilter.all,
-              onTap: () async {
-                final picked = await _pickStatus(context, _statusFilter);
-                if (!mounted) return;
-                if (picked == null) return;
-                setState(() => _statusFilter = picked);
-              },
-            ),
-            const SizedBox(width: 10),
-            _Pill(
-              icon: Icons.warning_amber_rounded,
-              label: switch (_riskPick) {
-                _RiskPick.low => 'Low',
-                _RiskPick.moderate => 'Medium',
-                _RiskPick.high => 'High',
-                _RiskPick.all => 'Risk',
-              },
-              selected: _riskPick != _RiskPick.all,
-              onTap: () async {
-                final picked = await _pickRisk(context, _riskPick);
-                if (!mounted) return;
-                if (picked == null) return;
-                setState(() => _riskPick = picked);
-              },
-            ),
-            const SizedBox(width: 10),
-            IconButton(
-              onPressed: _riskPick != _RiskPick.all
-                  ? null
-                  : () => setState(() {
-                        _riskSort = _riskSort == _RiskSort.highToLow
-                            ? _RiskSort.lowToHigh
-                            : _RiskSort.highToLow;
-                      }),
-              icon: const Icon(Icons.swap_vert_rounded),
-              style: IconButton.styleFrom(
-                backgroundColor: scheme.surfaceContainerHighest,
-                foregroundColor: scheme.onSurface,
-                side: BorderSide(
-                    color: scheme.outline.withValues(alpha: 0.65)),
-              ),
-            ),
-          ],
+          ),
         ),
         const SizedBox(height: 16),
         Expanded(

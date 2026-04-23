@@ -23,10 +23,9 @@ class ClinicianShell extends ConsumerWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final isNarrow = constraints.maxWidth < 900;
-        // Search is only relevant on the review queue list.
-        // Hide it on dashboard, case review, and settings to avoid crowding
-        // the mobile top bar.
-        final showSearch = path.startsWith('/c/queue');
+        // Mobile queue page now owns its search UI (for correct placement).
+        // Keep the top bar clean everywhere.
+        const showSearch = false;
 
         if (isNarrow) {
           return Scaffold(
@@ -127,6 +126,8 @@ class _SideNavContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final isDrawer = (Scaffold.maybeOf(context)?.isDrawerOpen ?? false) &&
+        MediaQuery.sizeOf(context).width < 900;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -168,6 +169,14 @@ class _SideNavContent extends StatelessWidget {
                 ),
               ],
             ),
+            if (isDrawer) ...[
+              const Spacer(),
+              IconButton(
+                tooltip: 'Close',
+                onPressed: () => Navigator.of(context).pop(),
+                icon: Icon(Icons.close_rounded, color: scheme.onSurfaceVariant),
+              ),
+            ],
           ],
         ),
         const SizedBox(height: 18),
@@ -175,21 +184,36 @@ class _SideNavContent extends StatelessWidget {
           label: 'Dashboard',
           icon: Icons.grid_view_rounded,
           selected: _isSelected('/c/dashboard'),
-          onTap: () => context.go('/c/dashboard'),
+          onTap: () {
+            if (Scaffold.maybeOf(context)?.isDrawerOpen ?? false) {
+              Navigator.of(context).pop();
+            }
+            context.go('/c/dashboard');
+          },
         ),
         const SizedBox(height: 6),
         _NavItem(
           label: 'Patients',
           icon: Icons.people_outline_rounded,
           selected: _isSelected('/c/queue') || _isSelected('/c/case/'),
-          onTap: () => context.go('/c/queue'),
+          onTap: () {
+            if (Scaffold.maybeOf(context)?.isDrawerOpen ?? false) {
+              Navigator.of(context).pop();
+            }
+            context.go('/c/queue');
+          },
         ),
         const SizedBox(height: 6),
         _NavItem(
           label: 'Settings',
           icon: Icons.settings_outlined,
           selected: _isSelected('/c/settings'),
-          onTap: () => context.go('/c/settings'),
+          onTap: () {
+            if (Scaffold.maybeOf(context)?.isDrawerOpen ?? false) {
+              Navigator.of(context).pop();
+            }
+            context.go('/c/settings');
+          },
         ),
         const Spacer(),
         TextButton.icon(

@@ -219,14 +219,6 @@ class _M83StreamAssembler {
 
   void _stripHeaders() => _stripHeadersFromList(_buf);
 
-  static int? _lastMarkerInList(List<int> data, int a, int b, int start) {
-    if (data.length < start + 2) return null;
-    for (var i = data.length - 2; i >= start; i--) {
-      if (data[i] == a && data[i + 1] == b) return i;
-    }
-    return null;
-  }
-
   static Uint8List? _trimToLastEoi(Uint8List frame) {
     for (var i = frame.length - 2; i >= 0; i--) {
       if (frame[i] == 0xff && frame[i + 1] == 0xd9) {
@@ -253,6 +245,10 @@ class _M83StreamAssembler {
     return null;
   }
 
+  // If we accumulate too many bytes without finding an EOI marker, assume the
+  // stream is desynced/corrupted and resync to the next SOI.
+  static const int _maxFrameBytes = 900 * 1024;
+
   void _extractJpegs(void Function(Uint8List jpeg) onJpeg) {
     while (true) {
       // Strip hardware headers before each frame; they often sit between JPEGs
@@ -267,29 +263,20 @@ class _M83StreamAssembler {
         _buf.removeRange(0, soi);
       }
 
-      final nextSoi = _findPair(0xff, 0xd8, 2);
-
-      if (nextSoi != null) {
-        // Headers often sit *between* SOI markers in the raw TCP merge. Stripping
-        // only from the global buffer start misses those bytes. Copy the full
-        // first-JPEG segment, strip headers inside the copy, then end at the
-        // last EOI so trailing padding is not fed to the decoder.
-        final slice = List<int>.from(_buf.sublist(0, nextSoi));
-        _stripHeadersFromList(slice);
-        final lastEoi = _lastMarkerInList(slice, 0xff, 0xd9, 2);
-        // If we haven't received the full JPEG (EOI not present yet),
-        // keep buffering instead of emitting a partial frame (visual glitches).
-        if (lastEoi == null) {
-          return;
-        }
-        final frame = Uint8List.fromList(slice.sublist(0, lastEoi + 2));
-        _buf.removeRange(0, nextSoi);
-        _emitIfJpeg(frame, onJpeg);
-        continue;
-      }
-
       final eoi = _findPair(0xff, 0xd9, 2);
       if (eoi == null) {
+        // Too much data without EOI => resync.
+        if (_buf.length > _maxFrameBytes) {
+          final nextSoi = _findPair(0xff, 0xd8, 2);
+          if (nextSoi != null) {
+            _buf.removeRange(0, nextSoi);
+          } else {
+            // Keep only the tail; next ingest may contain the next SOI.
+            final cut = _buf.length - 64 * 1024;
+            if (cut > 0) _buf.removeRange(0, cut);
+          }
+          continue;
+        }
         return;
       }
 

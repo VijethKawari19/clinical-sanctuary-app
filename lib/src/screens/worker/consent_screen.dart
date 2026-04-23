@@ -60,7 +60,7 @@ class ConsentScreen extends ConsumerWidget {
                               ref
                                   .read(sessionControllerProvider.notifier)
                                   .acceptConsent();
-                              context.go('/w/capture');
+                              context.go('/w/patient-info');
                             },
                             child: const Text('I Consent'),
                           ),

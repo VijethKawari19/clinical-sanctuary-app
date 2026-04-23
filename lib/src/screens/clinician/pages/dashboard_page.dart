@@ -101,7 +101,7 @@ class ClinicianDashboardPage extends ConsumerWidget {
                                 'Initiate a new oral health screening using the AI-assisted capture tool.',
                             icon: Icons.photo_camera_outlined,
                             linkLabel: 'Start Screening',
-                            onTap: () => context.push('/w/capture'),
+                      onTap: () => context.push('/w/patient-info'),
                           ),
                         ),
                         SizedBox(
