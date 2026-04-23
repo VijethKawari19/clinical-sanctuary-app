@@ -54,6 +54,8 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   int _m83LastPreviewMs = 0;
   int _m83LastFrameMs = 0;
   Timer? _m83Watchdog;
+  final List<Uint8List> _m83FrameRing = [];
+  static const int _m83RingMax = 28;
 
   late final FaceDetector _faceDetector = FaceDetector(
     options: FaceDetectorOptions(
@@ -295,6 +297,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     if (mounted) {
       setState(() {
         _m83LiveJpeg = null;
+        _m83FrameRing.clear();
         _m83Error = null;
         _m83Connecting = false;
         _m83LastFrameMs = 0;
@@ -347,8 +350,15 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         _m83LastFrameMs = now;
         if (now - _m83LastPreviewMs < 36) return;
         _m83LastPreviewMs = now;
+        // Keep a small rolling buffer so "Capture" can pick the best frame
+        // (avoids freezing a single corrupted-but-decodable frame).
+        final copy = Uint8List.fromList(jpeg);
+        _m83FrameRing.add(copy);
+        if (_m83FrameRing.length > _m83RingMax) {
+          _m83FrameRing.removeRange(0, _m83FrameRing.length - _m83RingMax);
+        }
         setState(() {
-          _m83LiveJpeg = jpeg;
+          _m83LiveJpeg = copy;
           _m83Connecting = false;
         });
       },
@@ -406,7 +416,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
       unawaited(_retakeReview());
       return;
     }
-    _snapshotM83ToReview();
+    unawaited(_snapshotM83ToReview());
   }
 
   /// Lower keys (back / trash) — only acts during review to match device UX.
@@ -416,22 +426,135 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     unawaited(_retakeReview());
   }
 
-  void _snapshotM83ToReview() {
-    final j = _m83LiveJpeg;
-    if (j == null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'No frame yet. Wait for the preview or check IP/port.',
-            ),
-          ),
-        );
+  Future<bool> _canDecodeJpeg(Uint8List bytes) async {
+    try {
+      final codec = await ui.instantiateImageCodec(bytes);
+      codec.dispose();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> _hasBottomBandCorruption(Uint8List bytes) async {
+    try {
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      codec.dispose();
+      final img = frame.image;
+      final w = img.width;
+      final h = img.height;
+      if (w <= 0 || h <= 0) {
+        img.dispose();
+        return false;
       }
+
+      // Inspect only the bottom ~12% of the image.
+      final y0 = (h * 0.88).floor().clamp(0, h - 1);
+      final bandH = (h - y0).clamp(1, h);
+
+      final data = await img.toByteData(format: ui.ImageByteFormat.rawRgba);
+      img.dispose();
+      if (data == null) return false;
+
+      // Sample sparsely for performance.
+      final strideX = (w / 40).ceil().clamp(1, 16);
+      final strideY = (bandH / 10).ceil().clamp(1, 8);
+
+      int n = 0;
+      int uniformish = 0;
+      int sumR = 0, sumG = 0, sumB = 0;
+
+      int? r0, g0, b0;
+      for (var y = y0; y < h; y += strideY) {
+        for (var x = 0; x < w; x += strideX) {
+          final idx = (y * w + x) * 4;
+          final r = data.getUint8(idx);
+          final g = data.getUint8(idx + 1);
+          final b = data.getUint8(idx + 2);
+          n++;
+          sumR += r;
+          sumG += g;
+          sumB += b;
+          r0 ??= r;
+          g0 ??= g;
+          b0 ??= b;
+          // Treat as "uniform-ish" if close to first sampled pixel.
+          final dr = (r - r0).abs();
+          final dg = (g - g0).abs();
+          final db = (b - b0).abs();
+          if (dr + dg + db < 30) uniformish++;
+        }
+      }
+
+      if (n == 0) return false;
+
+      // If the bottom band is extremely uniform, it is likely a corrupted strip.
+      // (Real intraoral images have texture/variation, not a flat band.)
+      final ratio = uniformish / n;
+      if (ratio > 0.92) return true;
+
+      // A common corruption pattern is a green/teal band. Detect strong green bias.
+      final meanR = sumR / n;
+      final meanG = sumG / n;
+      final meanB = sumB / n;
+      if (meanG - meanR > 28 && meanG - meanB > 28) return true;
+
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _snapshotM83ToReview() async {
+    // Pick the most "complete" recent frame:
+    // - must decode
+    // - prefer larger byte size (missing bottom scan data often reduces size)
+    // We sample from the last ~0.5–1s of frames.
+    final candidates = List<Uint8List>.from(_m83FrameRing);
+    final live = _m83LiveJpeg;
+    if (live != null) candidates.add(live);
+
+    Uint8List? best;
+    var bestLen = -1;
+    for (var i = candidates.length - 1; i >= 0; i--) {
+      final c = candidates[i];
+      if (c.length <= bestLen) continue;
+      if (!await _canDecodeJpeg(c)) continue;
+      if (await _hasBottomBandCorruption(c)) continue;
+      best = c;
+      bestLen = c.length;
+    }
+
+    // If no clean candidate found, wait for newer frames (up to ~1.6s).
+    if (best == null) {
+      const tries = 20;
+      for (var i = 0; i < tries; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 80));
+        if (!mounted) return;
+        final j = _m83LiveJpeg;
+        if (j == null) continue;
+        if (await _canDecodeJpeg(j) && !(await _hasBottomBandCorruption(j))) {
+          best = j;
+          break;
+        }
+      }
+    }
+
+    if (!mounted) return;
+    if (best == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Could not capture a clean frame. Move closer to the camera Wi‑Fi and try again.',
+          ),
+        ),
+      );
       return;
     }
+
     setState(() {
-      _reviewBytes = Uint8List.fromList(j);
+      _reviewBytes = Uint8List.fromList(best!);
       _reviewMode = CaptureMode.wireless;
     });
   }

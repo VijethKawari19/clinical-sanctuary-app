@@ -186,6 +186,12 @@ class _PatientInfoScreenState extends ConsumerState<PatientInfoScreen> {
 
   /// [context.go] to this screen leaves no stack entry, so [pop] does nothing.
   void _leavePatientInfo() {
+    final role = ref.read(sessionControllerProvider).role;
+    if (role == AppRole.clinician) {
+      // Clinicians start screening from the dashboard; back should always return there.
+      if (mounted) context.go('/c/dashboard');
+      return;
+    }
     if (context.canPop()) {
       context.pop();
       return;
