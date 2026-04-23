@@ -227,7 +227,7 @@ class _M83StreamAssembler {
     return null;
   }
 
-  static Uint8List _trimToLastEoi(Uint8List frame) {
+  static Uint8List? _trimToLastEoi(Uint8List frame) {
     for (var i = frame.length - 2; i >= 0; i--) {
       if (frame[i] == 0xff && frame[i + 1] == 0xd9) {
         final end = i + 2;
@@ -235,11 +235,13 @@ class _M83StreamAssembler {
         return Uint8List.sublistView(frame, 0, end);
       }
     }
-    return frame;
+    // No EOI marker present: likely a partial/corrupted JPEG. Drop it.
+    return null;
   }
 
   static void _emitIfJpeg(Uint8List frame, void Function(Uint8List jpeg) onJpeg) {
     final f = _trimToLastEoi(frame);
+    if (f == null) return;
     if (f.length < 10 || f[0] != 0xff || f[1] != 0xd8) return;
     onJpeg(f);
   }
@@ -275,12 +277,12 @@ class _M83StreamAssembler {
         final slice = List<int>.from(_buf.sublist(0, nextSoi));
         _stripHeadersFromList(slice);
         final lastEoi = _lastMarkerInList(slice, 0xff, 0xd9, 2);
-        final Uint8List frame;
-        if (lastEoi != null) {
-          frame = Uint8List.fromList(slice.sublist(0, lastEoi + 2));
-        } else {
-          frame = Uint8List.fromList(slice);
+        // If we haven't received the full JPEG (EOI not present yet),
+        // keep buffering instead of emitting a partial frame (visual glitches).
+        if (lastEoi == null) {
+          return;
         }
+        final frame = Uint8List.fromList(slice.sublist(0, lastEoi + 2));
         _buf.removeRange(0, nextSoi);
         _emitIfJpeg(frame, onJpeg);
         continue;

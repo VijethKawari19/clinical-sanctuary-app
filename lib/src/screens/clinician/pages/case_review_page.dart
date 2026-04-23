@@ -225,6 +225,7 @@ class _CaseReviewPageState extends ConsumerState<CaseReviewPage> {
         : null;
 
     final scheme = Theme.of(context).colorScheme;
+    final isNarrow = MediaQuery.sizeOf(context).width < 520;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -288,7 +289,7 @@ class _CaseReviewPageState extends ConsumerState<CaseReviewPage> {
                       );
                     },
               icon: const Icon(Icons.download_outlined),
-              label: const Text('Export Report'),
+              label: Text(isNarrow ? 'Export' : 'Export Report'),
               style: OutlinedButton.styleFrom(minimumSize: const Size(0, 44)),
             ),
           ],

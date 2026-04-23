@@ -23,8 +23,10 @@ class ClinicianShell extends ConsumerWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final isNarrow = constraints.maxWidth < 900;
-        final showSearch =
-            !path.startsWith('/c/queue') && !path.startsWith('/c/settings');
+        // Search is only relevant on the review queue list.
+        // Hide it on dashboard, case review, and settings to avoid crowding
+        // the mobile top bar.
+        final showSearch = path.startsWith('/c/queue');
 
         if (isNarrow) {
           return Scaffold(
@@ -273,65 +275,73 @@ class _TopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Container(
-      height: 62,
-      padding: const EdgeInsets.symmetric(horizontal: 18),
-      decoration: BoxDecoration(
-        color: scheme.surface,
-        border: Border(
-          bottom: BorderSide(color: scheme.outline.withValues(alpha: 0.45)),
+    final isTight = MediaQuery.sizeOf(context).width < 430;
+    final hPad = isTight ? 12.0 : 18.0;
+
+    return SafeArea(
+      bottom: false,
+      child: Container(
+        height: 56,
+        padding: EdgeInsets.symmetric(horizontal: hPad),
+        decoration: BoxDecoration(
+          color: scheme.surface,
+          border: Border(
+            bottom: BorderSide(color: scheme.outline.withValues(alpha: 0.45)),
+          ),
         ),
-      ),
-      child: Row(
-        children: [
-          if (leading != null) ...[leading!, const SizedBox(width: 8)],
-          Expanded(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 520),
-              child: showSearch
-                  ? TextField(
-                      style: TextStyle(color: scheme.onSurface),
-                      decoration: InputDecoration(
-                        hintText: 'Search patients, records...',
-                        hintStyle: TextStyle(color: scheme.onSurfaceVariant),
-                        prefixIcon: Icon(
-                          Icons.search_rounded,
-                          color: scheme.onSurfaceVariant,
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 12,
-                        ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
-                          borderSide: BorderSide(
-                            color: scheme.outline.withValues(alpha: 0.65),
+        child: Row(
+          children: [
+            if (leading != null) ...[leading!, const SizedBox(width: 8)],
+            Expanded(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 520),
+                child: showSearch
+                    ? TextField(
+                        style: TextStyle(color: scheme.onSurface),
+                        decoration: InputDecoration(
+                          hintText: 'Search patients…',
+                          hintStyle: TextStyle(color: scheme.onSurfaceVariant),
+                          prefixIcon: Icon(
+                            Icons.search_rounded,
+                            color: scheme.onSurfaceVariant,
                           ),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
-                          borderSide: BorderSide(
-                            color: scheme.outline.withValues(alpha: 0.65),
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
                           ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: BorderSide(
+                              color: scheme.outline.withValues(alpha: 0.65),
+                            ),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: BorderSide(
+                              color: scheme.outline.withValues(alpha: 0.65),
+                            ),
+                          ),
+                          filled: true,
+                          fillColor: scheme.surfaceContainerHighest,
                         ),
-                        filled: true,
-                        fillColor: scheme.surfaceContainerHighest,
-                      ),
-                    )
-                  : const SizedBox.shrink(),
+                      )
+                    : const SizedBox.shrink(),
+              ),
             ),
-          ),
-          const SizedBox(width: 16),
-          IconButton(
-            onPressed: () {},
-            icon: Icon(
-              Icons.notifications_none_rounded,
-              color: scheme.onSurfaceVariant,
+            const SizedBox(width: 8),
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              onPressed: () {},
+              icon: Icon(
+                Icons.notifications_none_rounded,
+                color: scheme.onSurfaceVariant,
+              ),
             ),
-          ),
-          const SizedBox(width: 10),
-          _ProfileButton(photoBase64: photoBase64),
-        ],
+            const SizedBox(width: 6),
+            _ProfileButton(photoBase64: photoBase64),
+          ],
+        ),
       ),
     );
   }

@@ -168,29 +168,33 @@ class _PatientInfoScreenState extends ConsumerState<PatientInfoScreen> {
     return Scaffold(
       body: Column(
         children: [
-          Container(
-            height: 62,
-            padding: const EdgeInsets.symmetric(horizontal: 18),
-            decoration: BoxDecoration(
-              color: scheme.surface,
-              border: Border(
-                  bottom: BorderSide(
-                      color: scheme.outline.withValues(alpha: 0.45))),
-            ),
-            child: Row(
-              children: [
-                IconButton(
-                  onPressed: _leavePatientInfo,
-                  icon: const Icon(Icons.arrow_back_rounded),
+          SafeArea(
+            bottom: false,
+            child: Container(
+              height: 56,
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              decoration: BoxDecoration(
+                color: scheme.surface,
+                border: Border(
+                  bottom: BorderSide(color: scheme.outline.withValues(alpha: 0.45)),
                 ),
-                const SizedBox(width: 10),
-                Text(
-                  'Patient Details',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w900,
-                      ),
-                ),
-              ],
+              ),
+              child: Row(
+                children: [
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    onPressed: _leavePatientInfo,
+                    icon: const Icon(Icons.arrow_back_rounded),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Patient Details',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w900,
+                        ),
+                  ),
+                ],
+              ),
             ),
           ),
           Expanded(
@@ -596,8 +600,19 @@ class _PatientInfoScreenState extends ConsumerState<PatientInfoScreen> {
                                                     },
                                               icon: const Icon(
                                                   Icons.send_rounded, size: 18),
-                                              label:
-                                                  const Text('Save & Submit Case'),
+                                              label: const Text(
+                                                'Save & Submit Case',
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                softWrap: false,
+                                              ),
+                                              style: ElevatedButton.styleFrom(
+                                                minimumSize: const Size(0, 48),
+                                                padding: const EdgeInsets.symmetric(
+                                                  horizontal: 14,
+                                                  vertical: 12,
+                                                ),
+                                              ),
                                             ),
                                           ),
                                         ],

@@ -137,7 +137,12 @@ class SubmissionSuccessScreen extends ConsumerWidget {
                                           .clearTempCapture();
                                       context.go('/w/capture');
                                     },
-                                    child: const Text('Do more screening'),
+                                    child: const Text(
+                                      'Do more screening',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      softWrap: false,
+                                    ),
                                   ),
                                 ),
                               ],
