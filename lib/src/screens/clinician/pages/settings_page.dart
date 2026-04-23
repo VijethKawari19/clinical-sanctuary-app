@@ -1,12 +1,16 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:excel/excel.dart' as xls;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../theme/app_theme.dart';
@@ -32,6 +36,25 @@ class ClinicianSettingsPage extends ConsumerWidget {
     required String mimeType,
     required Uint8List bytes,
   }) async {
+    // Mobile: use share sheet (works for both "Save to Files" and sharing).
+    if (!kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.android ||
+            defaultTargetPlatform == TargetPlatform.iOS)) {
+      final dir = await getTemporaryDirectory();
+      final path = '${dir.path}${Platform.pathSeparator}$filename';
+      final f = File(path);
+      await f.writeAsBytes(bytes, flush: true);
+      if (!context.mounted) return;
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(path, mimeType: mimeType, name: filename)],
+          subject: filename,
+        ),
+      );
+      return;
+    }
+
+    // Desktop/web: save via file picker.
     final file = XFile.fromData(bytes, mimeType: mimeType, name: filename);
     final location = await getSaveLocation(suggestedName: filename);
     if (!context.mounted) return;
