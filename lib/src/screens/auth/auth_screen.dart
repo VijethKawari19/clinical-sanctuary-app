@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -95,7 +96,9 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
   }
 
   Future<void> _pickDocument() async {
-    String? label;
+    List<String> picked = [];
+
+    // Desktop/Web: file_selector
     if (kIsWeb ||
         defaultTargetPlatform == TargetPlatform.windows ||
         defaultTargetPlatform == TargetPlatform.linux ||
@@ -109,24 +112,43 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
         ],
       );
       if (f == null) return;
-      label = f.path.isNotEmpty ? f.path : f.name;
+      final label = f.path.isNotEmpty ? f.path : f.name;
+      picked = [label];
     } else {
-      // Mobile: skip or use image_picker — keep file_selector path only on desktop
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Document pick on this platform: use desktop build or add picker.',
+      // Mobile (Android/iOS): file_picker
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['pdf', 'png', 'jpg', 'jpeg'],
+        allowMultiple: true,
+        withData: false,
+        withReadStream: false,
+      );
+      if (result == null) return;
+
+      picked = result.files
+          .map((f) => f.path)
+          .whereType<String>()
+          .where((p) => p.trim().isNotEmpty)
+          .toList();
+
+      // Some Android providers may return null paths; fall back to showing name.
+      if (picked.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Selected file is not accessible on this device.'),
             ),
-          ),
-        );
+          );
+        }
+        return;
       }
-      return;
     }
+
     if (!mounted) return;
-    final docPath = label;
     setState(() {
-      _documentPaths.add(docPath);
+      for (final p in picked) {
+        if (!_documentPaths.contains(p)) _documentPaths.add(p);
+      }
     });
   }
 
