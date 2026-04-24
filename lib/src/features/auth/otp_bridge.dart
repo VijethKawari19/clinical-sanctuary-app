@@ -1,6 +1,7 @@
-import 'package:flutter/foundation.dart';
 import 'package:mailer/mailer.dart';
 import 'package:mailer/smtp_server.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 
 /// Pluggable bridge for sending OTP (SMTP in production). Stub logs / surfaces in debug.
 abstract class OtpBridge {
@@ -14,7 +15,7 @@ class StubOtpBridge implements OtpBridge {
     required String email,
     required String code,
   }) async {
-    debugPrint('[OTP] $email → $code (stub: replace with SMTP/API)');
+    // Intentionally no-op.
   }
 }
 
@@ -123,5 +124,36 @@ class SmtpOtpBridge implements OtpBridge {
 ''';
 
     await send(msg, server);
+  }
+}
+
+/// Calls a backend API to send the OTP email.
+///
+/// Configure via `--dart-define=OTP_API_BASE_URL=https://your-server`.
+class HttpOtpBridge implements OtpBridge {
+  HttpOtpBridge({required this.baseUrl});
+
+  final String baseUrl;
+
+  static HttpOtpBridge? tryFromDartDefines() {
+    const base = String.fromEnvironment('OTP_API_BASE_URL');
+    if (base.isEmpty) return null;
+    return HttpOtpBridge(baseUrl: base);
+  }
+
+  @override
+  Future<void> sendRecoveryCode({
+    required String email,
+    required String code,
+  }) async {
+    final uri = Uri.parse(baseUrl).resolve('/otp/recovery');
+    final resp = await http.post(
+      uri,
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({'email': email, 'code': code}),
+    );
+    if (resp.statusCode < 200 || resp.statusCode >= 300) {
+      throw StateError('OTP API error ${resp.statusCode}: ${resp.body}');
+    }
   }
 }
