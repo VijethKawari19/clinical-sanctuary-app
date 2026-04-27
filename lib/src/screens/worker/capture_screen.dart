@@ -132,10 +132,11 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         defaultTargetPlatform == TargetPlatform.linux;
   }
 
-  bool get _useAndroidVlcM83Preview =>
-      !kIsWeb &&
-      defaultTargetPlatform == TargetPlatform.android &&
-      !_m83AndroidVlcDisabled;
+  // VLC-based Android preview is intentionally disabled while the native
+  // playback path is being stabilised; it caused the app to exit on some
+  // devices. The legacy JPEG-over-TCP path runs everywhere instead and
+  // works alongside the cleartext-HTTP allowance in the manifest.
+  bool get _useAndroidVlcM83Preview => false;
 
   Future<ui.Image> _decodeImage(Uint8List bytes) {
     final c = Completer<ui.Image>();
