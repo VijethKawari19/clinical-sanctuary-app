@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.6+6
+version: 1.0.7+7
 
 environment:
   sdk: ^3.11.4
@@ -78,7 +78,7 @@ msix_config:
   # Example format: "CN=Arka, O=Arka, L=Bengaluru, S=Karnataka, C=IN"
   publisher: "CN=Msix Testing, O=Msix Testing Corporation, S=Some-State, C=US"
   identity_name: Arka.ClinicalCurator
-  msix_version: 1.0.6.0
+  msix_version: 1.0.7.0
   logo_path: windows/runner/resources/app_icon.ico
   capabilities: internetClient
   # Point these at your real code-signing cert (PFX) when you get one.
