@@ -11,7 +11,10 @@ class MainActivity : FlutterActivity() {
         flutterEngine
             .platformViewsController
             .registry
-            .registerViewFactory(M83VlcPlayerViewFactory.VIEW_TYPE, M83VlcPlayerViewFactory())
+            .registerViewFactory(
+                M83VlcPlayerViewFactory.VIEW_TYPE,
+                M83VlcPlayerViewFactory(flutterEngine.dartExecutor.binaryMessenger),
+            )
 
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,

@@ -61,6 +61,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   bool _m83PreviewCheckInFlight = false;
   Uint8List? _m83PreviewPending;
   bool _m83AndroidVlcConnected = false;
+  bool _m83AndroidVlcDisabled = false;
   String? _m83VlcPreviewUrl;
   int? _m83VlcViewId;
 
@@ -132,7 +133,9 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   }
 
   bool get _useAndroidVlcM83Preview =>
-      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+      !kIsWeb &&
+      defaultTargetPlatform == TargetPlatform.android &&
+      !_m83AndroidVlcDisabled;
 
   Future<ui.Image> _decodeImage(Uint8List bytes) {
     final c = Completer<ui.Image>();
@@ -326,6 +329,25 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
       !kIsWeb &&
       (defaultTargetPlatform == TargetPlatform.android ||
           defaultTargetPlatform == TargetPlatform.iOS);
+
+  void _onAndroidVlcError(String message) {
+    if (!mounted) return;
+    if (_m83AndroidVlcDisabled) return;
+    setState(() {
+      _m83AndroidVlcDisabled = true;
+      _m83AndroidVlcConnected = false;
+      _m83VlcPreviewUrl = null;
+      _m83VlcViewId = null;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Wireless preview switched to legacy mode (${message.split('\n').first}).',
+        ),
+      ),
+    );
+    unawaited(_connectM83());
+  }
 
   String _m83HttpStreamUrl(String host, int port) {
     final uri = Uri(
@@ -1100,6 +1122,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         child: M83VlcPreview(
           streamUrl: vlcUrl,
           onViewCreated: (id) => _m83VlcViewId = id,
+          onError: _onAndroidVlcError,
         ),
       );
     }
