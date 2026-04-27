@@ -7,7 +7,6 @@ import 'package:camera_windows/camera_windows.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:image_picker/image_picker.dart';
@@ -20,7 +19,6 @@ import '../../features/clinic/clinic_models.dart';
 import '../../theme/app_theme.dart';
 import '../../features/clinic/clinic_controller.dart';
 import 'widgets/m83_wifi_guide_dialog.dart';
-import 'widgets/m83_vlc_preview.dart';
 
 enum CaptureSource { system, wireless, gallery }
 
@@ -60,10 +58,6 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   static const int _m83RingMax = 28;
   bool _m83PreviewCheckInFlight = false;
   Uint8List? _m83PreviewPending;
-  bool _m83AndroidVlcConnected = false;
-  bool _m83AndroidVlcDisabled = false;
-  String? _m83VlcPreviewUrl;
-  int? _m83VlcViewId;
 
   late final FaceDetector _faceDetector = FaceDetector(
     options: FaceDetectorOptions(
@@ -75,9 +69,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   );
 
   bool get _m83Streaming =>
-      !_inReview &&
-      ((_m83?.isConnected == true && _m83LiveJpeg != null) ||
-          (_useAndroidVlcM83Preview && _m83AndroidVlcConnected));
+      _m83?.isConnected == true && _m83LiveJpeg != null && !_inReview;
 
   bool _isAllowedGalleryImagePath(String path) {
     final ext = path.split('.').last.toLowerCase();
@@ -131,12 +123,6 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         defaultTargetPlatform == TargetPlatform.macOS ||
         defaultTargetPlatform == TargetPlatform.linux;
   }
-
-  // VLC-based Android preview is intentionally disabled while the native
-  // playback path is being stabilised; it caused the app to exit on some
-  // devices. The legacy JPEG-over-TCP path runs everywhere instead and
-  // works alongside the cleartext-HTTP allowance in the manifest.
-  bool get _useAndroidVlcM83Preview => false;
 
   Future<ui.Image> _decodeImage(Uint8List bytes) {
     final c = Completer<ui.Image>();
@@ -319,9 +305,6 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         _m83Error = null;
         _m83Connecting = false;
         _m83LastFrameMs = 0;
-        _m83AndroidVlcConnected = false;
-        _m83VlcPreviewUrl = null;
-        _m83VlcViewId = null;
       });
     }
   }
@@ -330,36 +313,6 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
       !kIsWeb &&
       (defaultTargetPlatform == TargetPlatform.android ||
           defaultTargetPlatform == TargetPlatform.iOS);
-
-  void _onAndroidVlcError(String message) {
-    if (!mounted) return;
-    if (_m83AndroidVlcDisabled) return;
-    setState(() {
-      _m83AndroidVlcDisabled = true;
-      _m83AndroidVlcConnected = false;
-      _m83VlcPreviewUrl = null;
-      _m83VlcViewId = null;
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Wireless preview switched to legacy mode (${message.split('\n').first}).',
-        ),
-      ),
-    );
-    unawaited(_connectM83());
-  }
-
-  String _m83HttpStreamUrl(String host, int port) {
-    final uri = Uri(
-      scheme: 'http',
-      host: host,
-      port: port,
-      path: '/',
-      queryParameters: const {'action': 'stream'},
-    );
-    return uri.toString();
-  }
 
   void _ingestM83PreviewFrame(Uint8List jpeg) {
     if (!mounted || _inReview) return;
@@ -445,43 +398,6 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     final port = int.tryParse(_m83PortCtrl.text.trim()) ?? 40005;
 
     await _disconnectM83();
-
-    if (_useAndroidVlcM83Preview) {
-      setState(() {
-        _m83Connecting = true;
-        _m83Error = null;
-        _m83AndroidVlcConnected = false;
-        _m83VlcPreviewUrl = null;
-        _m83VlcViewId = null;
-      });
-
-      // The M83 often needs a small TCP wake packet before its HTTP stream is
-      // available. VLC owns playback after this; Windows keeps the Dart decoder.
-      final wakeClient = M83WirelessClient(host: host, port: port);
-      try {
-        await wakeClient.connect();
-        await Future<void>.delayed(const Duration(milliseconds: 300));
-      } catch (e) {
-        if (mounted) {
-          setState(() {
-            _m83Connecting = false;
-            _m83Error = '$e';
-          });
-        }
-        await wakeClient.disconnect();
-        return;
-      }
-      await wakeClient.disconnect();
-
-      if (!mounted) return;
-      setState(() {
-        _m83Connecting = false;
-        _m83AndroidVlcConnected = true;
-        _m83VlcPreviewUrl = _m83HttpStreamUrl(host, port);
-        _m83LastFrameMs = DateTime.now().millisecondsSinceEpoch;
-      });
-      return;
-    }
 
     final client = M83WirelessClient(
       host: host,
@@ -635,41 +551,6 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   }
 
   Future<void> _snapshotM83ToReview() async {
-    if (_useAndroidVlcM83Preview) {
-      final viewId = _m83VlcViewId;
-      if (viewId == null) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Wireless preview is still starting.')),
-        );
-        return;
-      }
-
-      try {
-        final bytes = await M83VlcPreview.channel.invokeMethod<Uint8List>(
-          'takeSnapshot',
-          {'viewId': viewId},
-        );
-        if (!mounted) return;
-        if (bytes == null || bytes.isEmpty) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Could not capture the VLC frame.')),
-          );
-          return;
-        }
-        setState(() {
-          _reviewBytes = bytes;
-          _reviewMode = CaptureMode.wireless;
-        });
-      } on PlatformException catch (e) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.message ?? 'Could not capture VLC frame.')),
-        );
-      }
-      return;
-    }
-
     // Pick the most "complete" recent frame:
     // - must decode
     // - prefer larger byte size (missing bottom scan data often reduces size)
@@ -1114,19 +995,8 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
       );
     }
 
-    final connected = _m83?.isConnected == true || _m83AndroidVlcConnected;
+    final connected = _m83?.isConnected == true;
     final live = _m83LiveJpeg;
-    final vlcUrl = _m83VlcPreviewUrl;
-
-    if (connected && _useAndroidVlcM83Preview && vlcUrl != null) {
-      return SizedBox.expand(
-        child: M83VlcPreview(
-          streamUrl: vlcUrl,
-          onViewCreated: (id) => _m83VlcViewId = id,
-          onError: _onAndroidVlcError,
-        ),
-      );
-    }
 
     if (connected && live != null) {
       // Cover the preview area so letterboxing (often read as a "dark bar") is
