@@ -51,9 +51,6 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   bool _m83Connecting = false;
   String? _m83Error;
   Uint8List? _m83LiveJpeg;
-  // Mobile-only: pre-decoded ui.Image so we can render via RawImage and
-  // avoid Image.memory re-decoding the same JPEG bytes every rebuild.
-  ui.Image? _m83LiveImage;
   int _m83LastPreviewMs = 0;
   int _m83LastFrameMs = 0;
   Timer? _m83Watchdog;
@@ -106,13 +103,6 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   @override
   void dispose() {
     unawaited(_disconnectM83());
-    final liveImg = _m83LiveImage;
-    _m83LiveImage = null;
-    if (liveImg != null) {
-      try {
-        liveImg.dispose();
-      } catch (_) {}
-    }
     _m83HostCtrl.dispose();
     _m83PortCtrl.dispose();
     _controller?.dispose();
@@ -306,11 +296,9 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     if (c != null) {
       await c.disconnect();
     }
-    final oldImage = _m83LiveImage;
     if (mounted) {
       setState(() {
         _m83LiveJpeg = null;
-        _m83LiveImage = null;
         _m83FrameRing.clear();
         _m83PreviewCheckInFlight = false;
         _m83PreviewPending = null;
@@ -318,27 +306,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         _m83Connecting = false;
         _m83LastFrameMs = 0;
       });
-    } else {
-      _m83LiveImage = null;
     }
-    // Dispose after the state has been updated so the framework doesn't try
-    // to render a freed image. Safe to call from non-mounted state too.
-    _disposeImageAfterFrame(oldImage);
-  }
-
-  void _disposeImageAfterFrame(ui.Image? image) {
-    if (image == null) return;
-    if (!mounted) {
-      try {
-        image.dispose();
-      } catch (_) {}
-      return;
-    }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      try {
-        image.dispose();
-      } catch (_) {}
-    });
   }
 
   bool get _isMobile =>
@@ -370,10 +338,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
       return;
     }
 
-    // Mobile: decode the JPEG once, sample only a tiny rendered band for
-    // corruption, and reuse the decoded ui.Image for display via RawImage.
-    // This skips the per-frame Image.memory re-decode and the multi-MB
-    // toByteData materialisation that produced visible glitches on Android.
+    // Mobile: never display suspicious frames; validate asynchronously.
     if (_m83PreviewCheckInFlight) {
       _m83PreviewPending = jpeg;
       return;
@@ -381,22 +346,13 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
 
     _m83PreviewCheckInFlight = true;
     unawaited(() async {
-      final result = await _decodeAndCheckMobileFrame(jpeg);
-      if (!mounted) {
-        _disposeImageAfterFrame(result.image);
-        return;
-      }
-      if (result.image != null && !result.corrupted) {
-        final old = _m83LiveImage;
+      final isBad = await _hasBottomBandCorruption(jpeg);
+      if (!mounted) return;
+      if (!isBad) {
         setState(() {
           _m83LiveJpeg = jpeg;
-          _m83LiveImage = result.image;
           _m83Connecting = false;
         });
-        _disposeImageAfterFrame(old);
-      } else {
-        // Drop the frame; release any decoded image immediately.
-        _disposeImageAfterFrame(result.image);
       }
       _m83PreviewCheckInFlight = false;
       final pending = _m83PreviewPending;
@@ -405,109 +361,6 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         _ingestM83PreviewFrame(pending);
       }
     }());
-  }
-
-  /// Decode a JPEG once and (cheaply) sample its bottom band for corruption.
-  ///
-  /// Returns the decoded [ui.Image] when the frame is usable so the caller
-  /// can render it directly via [RawImage]. The caller owns disposal.
-  Future<({bool corrupted, ui.Image? image})> _decodeAndCheckMobileFrame(
-    Uint8List bytes,
-  ) async {
-    ui.Codec? codec;
-    ui.Image? img;
-    try {
-      codec = await ui.instantiateImageCodec(bytes);
-      final frame = await codec.getNextFrame();
-      img = frame.image;
-      final corrupted = await _isBottomBandCorruptOnImage(img);
-      if (corrupted) {
-        try {
-          img.dispose();
-        } catch (_) {}
-        return (corrupted: true, image: null);
-      }
-      return (corrupted: false, image: img);
-    } catch (_) {
-      try {
-        img?.dispose();
-      } catch (_) {}
-      return (corrupted: false, image: null);
-    } finally {
-      try {
-        codec?.dispose();
-      } catch (_) {}
-    }
-  }
-
-  /// Cheap bottom-band corruption check that renders just that band into a
-  /// small offscreen image (~60x12 pixels) instead of materialising the
-  /// entire frame to RGBA. This is the hot path on Android.
-  Future<bool> _isBottomBandCorruptOnImage(ui.Image img) async {
-    final w = img.width;
-    final h = img.height;
-    if (w <= 0 || h <= 0) return false;
-
-    const targetW = 60;
-    const targetH = 12;
-    final y0 = (h * 0.88).floor().clamp(0, h - 1);
-    final bandH = (h - y0).clamp(1, h);
-
-    ui.Picture? picture;
-    ui.Image? small;
-    try {
-      final recorder = ui.PictureRecorder();
-      final canvas = Canvas(recorder);
-      canvas.drawImageRect(
-        img,
-        Rect.fromLTWH(0, y0.toDouble(), w.toDouble(), bandH.toDouble()),
-        Rect.fromLTWH(0, 0, targetW.toDouble(), targetH.toDouble()),
-        Paint()..filterQuality = FilterQuality.low,
-      );
-      picture = recorder.endRecording();
-      small = await picture.toImage(targetW, targetH);
-      final data = await small.toByteData(format: ui.ImageByteFormat.rawRgba);
-      if (data == null) return false;
-
-      final pixelCount = targetW * targetH;
-      int sumR = 0, sumG = 0, sumB = 0;
-      int uniformish = 0;
-      int? r0, g0, b0;
-      for (var i = 0; i < pixelCount; i++) {
-        final idx = i * 4;
-        final r = data.getUint8(idx);
-        final g = data.getUint8(idx + 1);
-        final b = data.getUint8(idx + 2);
-        sumR += r;
-        sumG += g;
-        sumB += b;
-        r0 ??= r;
-        g0 ??= g;
-        b0 ??= b;
-        final dr = (r - r0).abs();
-        final dg = (g - g0).abs();
-        final db = (b - b0).abs();
-        if (dr + dg + db < 30) uniformish++;
-      }
-
-      final ratio = uniformish / pixelCount;
-      if (ratio > 0.92) return true;
-
-      final meanR = sumR / pixelCount;
-      final meanG = sumG / pixelCount;
-      final meanB = sumB / pixelCount;
-      if (meanG - meanR > 28 && meanG - meanB > 28) return true;
-      return false;
-    } catch (_) {
-      return false;
-    } finally {
-      try {
-        small?.dispose();
-      } catch (_) {}
-      try {
-        picture?.dispose();
-      } catch (_) {}
-    }
   }
 
   void _startM83Watchdog() {
@@ -557,38 +410,29 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
       onHardwareBack: _onM83HardwareBack,
       onError: (e) {
         if (!mounted) return;
-        final old = _m83LiveImage;
         setState(() {
           _m83 = null;
           _m83Error = e.toString();
           _m83Connecting = false;
           _m83LiveJpeg = null;
-          _m83LiveImage = null;
         });
-        _disposeImageAfterFrame(old);
       },
       onDisconnected: () {
         if (!mounted) return;
-        final old = _m83LiveImage;
         setState(() {
           _m83Connecting = false;
           _m83LiveJpeg = null;
-          _m83LiveImage = null;
         });
-        _disposeImageAfterFrame(old);
       },
     );
 
-    final oldImage = _m83LiveImage;
     setState(() {
       _m83 = client;
       _m83Connecting = true;
       _m83Error = null;
       _m83LiveJpeg = null;
-      _m83LiveImage = null;
       _m83LastFrameMs = 0;
     });
-    _disposeImageAfterFrame(oldImage);
 
     try {
       await client.connect();
@@ -1153,24 +997,6 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
 
     final connected = _m83?.isConnected == true;
     final live = _m83LiveJpeg;
-    final liveImage = _m83LiveImage;
-
-    if (connected && _isMobile && liveImage != null) {
-      // Mobile path: render the pre-decoded ui.Image directly. This avoids
-      // the per-rebuild JPEG re-decode that Image.memory performs on Android
-      // and was the main source of preview glitches.
-      return SizedBox.expand(
-        child: FittedBox(
-          fit: BoxFit.cover,
-          clipBehavior: Clip.hardEdge,
-          alignment: Alignment.center,
-          child: RawImage(
-            image: liveImage,
-            filterQuality: FilterQuality.medium,
-          ),
-        ),
-      );
-    }
 
     if (connected && live != null) {
       // Cover the preview area so letterboxing (often read as a "dark bar") is
