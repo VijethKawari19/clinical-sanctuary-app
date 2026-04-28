@@ -129,11 +129,17 @@ class SmtpOtpBridge implements OtpBridge {
 
 /// Calls a backend API to send the OTP email.
 ///
-/// Configure via `--dart-define=OTP_API_BASE_URL=https://your-server`.
+/// Override the server with `--dart-define=OTP_API_BASE_URL=https://your-server`.
+/// When unset, [auth_providers] falls back to [defaultProductionBaseUrl] so
+/// release APK/MSIX work without SMTP secrets (same as v1.0.5 release builds).
 class HttpOtpBridge implements OtpBridge {
   HttpOtpBridge({required this.baseUrl});
 
   final String baseUrl;
+
+  /// Hosted OTP mailer (Express + nodemailer). See `backend/otp-mailer/`.
+  static const String defaultProductionBaseUrl =
+      'https://clinicalcurator-otp-mailer.onrender.com';
 
   static HttpOtpBridge? tryFromDartDefines() {
     const base = String.fromEnvironment('OTP_API_BASE_URL');
